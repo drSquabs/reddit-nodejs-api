@@ -16,7 +16,8 @@ class RedditAPI {
          */
         return bcrypt.hash(user.password, HASH_ROUNDS)
             .then(hashedPassword => {
-                return this.conn.query('INSERT INTO users (username, password, createdAt, updatedAt) VALUES (?, ?, NOW(), NOW())', [user.username, hashedPassword]);
+                return this.conn.query(
+                    'INSERT INTO users (username, password, createdAt, updatedAt) VALUES (?, ?, NOW(), NOW())', [user.username, hashedPassword]);
             })
             .then(result => {
                 return result.insertId;
@@ -40,10 +41,10 @@ class RedditAPI {
         return this.conn.query(
             `
             INSERT INTO posts 
-            (userId, title, url, subredditId, createdAt, updatedAt)
+            (userId, title, url, subredditsId, createdAt, updatedAt)
             VALUES (?, ?, ?, ?, NOW(), NOW())
             `,
-            [post.userId, post.title, post.subredditId, post.url]
+            [post.userId, post.title, post.url, post.subredditId]
         )
             .then(result => {
                 return result.insertId;
@@ -54,25 +55,25 @@ class RedditAPI {
 
 
     createSubreddit(subreddit) {
-    //reference createUser function         
+    //reference createUser function  
         return this.conn.query(
             `
-            INSERT INTO subreddits (id, name, description)
-            VALUES (?, ?, ?, ?)`,
-            [subreddit.id, subreddit.name, subreddit.description, subreddit.url]
+            INSERT INTO subreddits (name, description) VALUES (?, ?)
+            `,
+            [subreddit.name, subreddit.description]
         )
             .then(result => {
                 return result.insertId;
-            })
-            .catch(error => {
-                // Special error handling for duplicate entry
-                if (error.code === 'P_ENTRY') {
-                    throw new Error('A subreddit with this name already exists');
-                }
-                else {
-                    throw error;
-                }
             });
+            // .catch(error => {
+            //     // Special error handling for duplicate entry
+            //     if (error.code === 'P_ENTRY') {
+            //         throw new Error('A subreddit with this name already exists');
+            //     }
+            //     else {
+            //         throw error;
+            //     }
+            // });
     }
     
     //Retrieve subreddits query
@@ -94,8 +95,8 @@ class RedditAPI {
                     description: sub.description,
                     createdAt: sub.createdAt,
                     updatedAt: sub.updatedAt
-                }
-            })
+                };
+            });
             return transformed_database_results;
         }));
     }
@@ -113,18 +114,22 @@ class RedditAPI {
          // we have to add join to this existing query and then run a .map on the results
         return this.conn.query(
             `
-            SELECT posts.id, title, url, posts.createdAt, posts.updatedAt, users.id AS userId2, username, 
-            users.createdAt AS usersCreatedAt, users.updatedAt AS usersUpdatedAt, posts.subredditsId
+            SELECT 
+                posts.id, title, url, posts.createdAt, posts.updatedAt,
+                users.id AS userId2, username, users.createdAt AS usersCreatedAt, users.updatedAt AS usersUpdatedAt,
+                posts.subredditsId, 
+                comments.text, comments.userId, comments.postId
+                SUM(votes.voteDirection) as voteScore
             FROM posts
-            LEFT JOIN users ON posts.userId = users.id
-            LEFT JOIN subreddits ON posts.subredditsId = subreddits.id
-            LEFT JOIN votes ON posts.id = votes.postId 
-            ORDER BY voteDirection DESC
+            JOIN users ON posts.userId = users.id
+            JOIN subreddits ON posts.subredditsId = subreddits.id
+            LEFT JOIN votes ON posts.id = votes.postId
+            ORDER BY voteScore, posts.createdAt DESC 
             LIMIT 25`
         )
-        .then((function(database_results) {
+        .then((function(databaseResults) {
             
-            var transformed_database_results = database_results.map(function(item) {
+            var transformedDatabaseResults = databaseResults.map(function(item) {
                 return {
                     id: item.id,
                     title: item.title,
@@ -134,36 +139,61 @@ class RedditAPI {
                     user:   {
                         id: item.userId2,
                         username: item.username,
-                        createdAt: item.createdAt,
-                        updatedAt: item.updatedAt
+                        createdAt: item.usersCreatedAt,
+                        updatedAt: item.usersUpdatedAt
                     },
                     subredditId: item.subredditsId
-                }
+                };
             });
             
-            return transformed_database_results;
+            return transformedDatabaseResults;
             
         }));
     } 
     
     createVote(vote) {
+        var voteDirection;
         if(voteDirection === 1) {
             return this.conn.query(
-            `INSERT INTO votes SET postId=?, userId=?, voteDirection=1 ON DUPLICATE KEY UPDATE voteDirection=?;`
-        )
+            `INSERT INTO votes 
+            SET postId=?, userId=?, voteDirection=1 
+            ON DUPLICATE KEY UPDATE voteDirection=?;`
+        );
             } else if (voteDirection === 0) {
                 return this.conn.query(
-            `INSERT INTO votes SET postId=?, userId=?, voteDirection=0 ON DUPLICATE KEY UPDATE voteDirection=?;`
-        )
+            `INSERT INTO votes
+            SET postId=?, userId=?, voteDirection=0 
+            ON DUPLICATE KEY UPDATE voteDirection=?;`
+        );
             } else if (voteDirection === -1) {
                 return this.conn.query(
-            `INSERT INTO votes SET postId=?, userId=?, voteDirection=-1 ON DUPLICATE KEY UPDATE voteDirection=?;`
-        )
+            `INSERT INTO votes 
+            SET postId=?, userId=?, voteDirection=-1 
+            ON DUPLICATE KEY UPDATE voteDirection=?;`
+        );
             } else { 
              return "error! not valid";
             }
         }
+        
+    createComment(comment) {
+        
+        return this.conn.query(
+            `
+            INSERT INTO comments 
+            (text, userId, postId)
+            VALUES (?, ?, ?)
+            `,
+            [comment.text, comment.userId, comment.postId]
+        )
+            .then(result => {
+                return result.postId;
+            });    
     }
+    
+}
+    
+
 
 
 
